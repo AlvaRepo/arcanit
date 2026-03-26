@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSession, destroyUserSessions, getUserByEmail } from '@/lib/sessions';
+import bcrypt from 'bcryptjs';
 
 export async function POST(request: NextRequest) {
   try {
@@ -15,7 +16,16 @@ export async function POST(request: NextRequest) {
     // Buscar usuario en la base de datos
     const user = await getUserByEmail(email);
 
-    if (!user || user.password !== password) {
+    if (!user) {
+      return NextResponse.json(
+        { error: 'Usuario o contraseña incorrectos' },
+        { status: 401 }
+      );
+    }
+
+    // Verificar contraseña con bcrypt
+    const passwordMatch = await bcrypt.compare(password, user.password);
+    if (!passwordMatch) {
       return NextResponse.json(
         { error: 'Usuario o contraseña incorrectos' },
         { status: 401 }

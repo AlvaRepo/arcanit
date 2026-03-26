@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-const BASE_URL = 'http://localhost:3001';
+const BASE_URL = 'https://arcanit-7hpq.vercel.app';
 
 test.describe('FactuARCA - Pruebas E2E', () => {
 
