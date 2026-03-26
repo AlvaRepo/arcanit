@@ -3,6 +3,7 @@ import { getUserIdFromRequest } from '@/lib/sessions';
 import { db, sql } from '@/lib/db';
 import { facturas, users } from '@/lib/schema';
 import { eq, and } from 'drizzle-orm';
+import { AFIPService, getTipoCbte, getTipoDoc } from '@/lib/afip';
 
 // Mapear tipo de factura a código ARCA
 const TIPO_FACTURA_CODIGO: Record<string, number> = {
@@ -12,6 +13,9 @@ const TIPO_FACTURA_CODIGO: Record<string, number> = {
   'E': 19, // Factura E (exportación)
   'M': 51,
 };
+
+// Feature flag para usar AFIP real o simulado
+const USE_AFIP_REAL = process.env.USE_AFIP_REAL === 'true';
 
 // Calcular IVA según tipo de factura
 function calcularIVA(monto: number, tipo: string): { neto: number; iva: number } {
@@ -68,17 +72,79 @@ export async function POST(request: NextRequest) {
     
     const numeroFactura = lastInvoice.length > 0 ? (lastInvoice[lastInvoice.length - 1].numero || 0) + 1 : 1;
 
-    // Generar CAE simulado
-    const cae = Math.random().toString().slice(2, 16).padStart(14, '0');
-    const fechaVencimiento = new Date();
-    fechaVencimiento.setDate(fechaVencimiento.getDate() + 30);
+    let cae = '';
+    let fechaVencimiento = new Date();
+    let resultado = 'A';
+
+    // Si USE_AFIP_REAL está habilitado, intentar usar AFIP real
+    if (USE_AFIP_REAL) {
+      try {
+        // Verificar si el usuario tiene certificado configurado
+        const [userData]: any = await sql`
+          SELECT certificado, clave_privada, punto_venta 
+          FROM users 
+          WHERE id = ${userId}
+        `;
+
+        if (!userData?.certificado || !userData?.clave_privada) {
+          return NextResponse.json({ 
+            error: 'Certificado no configurado. Por favor, configure su certificado en la sección de configuración.' 
+          }, { status: 400 });
+        }
+
+        // Usar servicio AFIP
+        const afipService = new AFIPService();
+        await afipService.initialize(userId);
+
+        // Preparar datos para AFIP
+        const afipRequest = {
+          tipoDoc: cliente?.docTipo ? getTipoDoc(cliente.docTipo) : 99,
+          nroDoc: cliente?.docNro || '',
+          tipoCbte: getTipoCbte(tipoLetra),
+          puntoVenta: userData.punto_venta,
+          cbtDesde: numeroFactura,
+          cbtHasta: numeroFactura,
+          impTotal: monto,
+          impNeto: neto,
+          impIVA: iva,
+          fechaCbte: new Date().toISOString().split('T')[0].replace(/-/g, ''),
+          concepto: 3, // Mixtos (productos y servicios)
+          clienteRazonSocial: cliente?.razonSocial || (tipoLetra === 'E' ? 'Cliente Exterior' : 'Consumidor Final'),
+          clienteDocTipo: cliente?.docTipo ? getTipoDoc(cliente.docTipo) : undefined,
+          clienteDocNro: cliente?.docNro || undefined,
+        };
+
+        const afipResult = await afipService.createInvoice(afipRequest);
+
+        if (afipResult.resultado === 'A' && afipResult.cae) {
+          cae = afipResult.cae;
+          fechaVencimiento = new Date(afipResult.fechaVencimiento);
+          resultado = 'A';
+        } else {
+          // AFIP devolvió error
+          const erroresMsg = afipResult.errores?.map(e => e.msg).join(', ') || 'Error desconocido';
+          return NextResponse.json({ 
+            error: `Error de AFIP: ${erroresMsg}` 
+          }, { status: 400 });
+        }
+      } catch (afipError: any) {
+        console.error('Error en AFIP:', afipError);
+        return NextResponse.json({ 
+          error: afipError.message || 'Error al conectar con AFIP' 
+        }, { status: 500 });
+      }
+    } else {
+      // Modo desarrollo: CAE simulado
+      cae = Math.random().toString().slice(2, 16).padStart(14, '0');
+      fechaVencimiento.setDate(fechaVencimiento.getDate() + 30);
+    }
 
     // Guardar en DB - usando SQL raw para evitar conflictos de tipos
     await sql`INSERT INTO facturas (
         usuario_id, cliente_id, numero, tipo, tipo_letra, concepto,
         monto, monto_neto, monto_iva, cliente_doc_tipo, cliente_doc_nro,
         cliente_razon_social, cliente_pais, cliente_moneda, cae, cae_vencimiento, resultado
-      ) VALUES (${userId}, ${cliente?.id || null}, ${numeroFactura}, ${`Factura ${tipoLetra}`}, ${tipoLetra}, ${'Servicios de Streaming'}, ${monto}, ${neto}, ${iva}, ${cliente?.docTipo ? parseInt(cliente.docTipo) : 99}, ${cliente?.docNro || ''}, ${cliente?.razonSocial || (tipoLetra === 'E' ? 'Cliente Exterior' : 'Consumidor Final')}, ${cliente?.pais || ''}, ${cliente?.moneda || 'ARS'}, ${cae}, ${fechaVencimiento.toISOString()}, ${'A'})`;
+      ) VALUES (${userId}, ${cliente?.id || null}, ${numeroFactura}, ${`Factura ${tipoLetra}`}, ${tipoLetra}, ${'Servicios de Streaming'}, ${monto}, ${neto}, ${iva}, ${cliente?.docTipo ? parseInt(cliente.docTipo) : 99}, ${cliente?.docNro || ''}, ${cliente?.razonSocial || (tipoLetra === 'E' ? 'Cliente Exterior' : 'Consumidor Final')}, ${cliente?.pais || ''}, ${cliente?.moneda || 'ARS'}, ${cae}, ${fechaVencimiento.toISOString()}, ${resultado})`;
 
     return NextResponse.json({
       success: true,
@@ -87,7 +153,7 @@ export async function POST(request: NextRequest) {
         tipo: `Factura ${tipoLetra}`,
         cae: cae,
         caeVencimiento: fechaVencimiento.toISOString(),
-        resultado: 'A',
+        resultado: resultado,
         monto: monto,
         montoNeto: neto,
         montoIVA: iva,
