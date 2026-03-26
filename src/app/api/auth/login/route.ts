@@ -13,7 +13,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Buscar usuario en la base de datos
-    const user = getUserByEmail(email);
+    const user = await getUserByEmail(email);
 
     if (!user || user.password !== password) {
       return NextResponse.json(
@@ -23,10 +23,10 @@ export async function POST(request: NextRequest) {
     }
 
     // Destruir sesiones anteriores del usuario (anti-sharing)
-    destroyUserSessions(user.id);
+    await destroyUserSessions(user.id);
     
     // Crear nueva sesión
-    const { token, expiresAt } = createSession(user.id);
+    const { token, expiresAt } = await createSession(user.id);
 
     const response = NextResponse.json({
       success: true,

@@ -97,7 +97,7 @@ export async function POST(request: NextRequest) {
 
     // Verificar si tiene todo para marcar config como completa
     const [userBefore] = await db.select().from(users).where(eq(users.id, parseInt(userId)));
-    const tieneCertificado = certificadoPath || userBefore?.certificadoPath;
+    const tieneCertificado = certificadoPath || userBefore?.certificado;
     
     if (cuit && puntoVenta && tieneCertificado) {
       updateData.configCompleta = true;

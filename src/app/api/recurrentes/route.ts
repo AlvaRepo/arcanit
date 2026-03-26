@@ -1,22 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserIdFromRequest } from '@/lib/sessions';
-import { db } from '@/lib/db';
+import { db, sql } from '@/lib/db';
 import { recurrentes } from '@/lib/schema';
 import { eq, and } from 'drizzle-orm';
 
 // GET - listar recurrentes
 export async function GET(request: NextRequest) {
-  const userId = getUserIdFromRequest(request);
+  const userId = await getUserIdFromRequest(request);
   
   if (!userId) {
     return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
   }
 
-  const userRecurrentes = db.select()
+  const userRecurrentes = await db.select()
     .from(recurrentes)
     .where(eq(recurrentes.usuarioId, userId))
-    .orderBy(recurrentes.id)
-    .all() as any[];
+    .orderBy(recurrentes.id);
 
   return NextResponse.json({ recurrentes: userRecurrentes.reverse() });
 }
@@ -24,7 +23,7 @@ export async function GET(request: NextRequest) {
 // POST - crear recurrente
 export async function POST(request: NextRequest) {
   try {
-    const userId = getUserIdFromRequest(request);
+    const userId = await getUserIdFromRequest(request);
     
     if (!userId) {
       return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
@@ -59,22 +58,15 @@ export async function POST(request: NextRequest) {
         proximaFecha.setMonth(proximaFecha.getMonth() + 1);
     }
 
-    const result = db.insert(recurrentes)
-      .values({
-        usuarioId: userId,
-        clienteId: clienteId || null,
-        clienteNombre: clienteNombre || 'Cliente',
-        monto: String(monto),
-        tipoFactura: tipoFactura || 'C',
-        frecuencia,
-        fechaInicio: fecha.toISOString(),
-        proximaFecha: proximaFecha.toISOString(),
-        activa: true,
-      })
-      .run();
+    // Guardar en DB usando SQL raw
+    const result = await sql`INSERT INTO recurrentes (
+        usuario_id, cliente_id, cliente_nombre, monto, tipo_factura,
+        frecuencia, fecha_inicio, proxima_fecha, activa
+      ) VALUES (${userId}, ${clienteId || null}, ${clienteNombre || 'Cliente'}, ${monto}, ${tipoFactura || 'C'}, ${frecuencia}, ${fecha.toISOString()}, ${proximaFecha.toISOString()}, ${true})
+      RETURNING id`;
 
     const nuevo = {
-      id: result.lastInsertRowid,
+      id: result[0].id,
       usuarioId: userId,
       clienteId: clienteId || null,
       clienteNombre: clienteNombre || 'Cliente',
@@ -96,7 +88,7 @@ export async function POST(request: NextRequest) {
 // PUT - activar/desactivar
 export async function PUT(request: NextRequest) {
   try {
-    const userId = getUserIdFromRequest(request);
+    const userId = await getUserIdFromRequest(request);
     
     if (!userId) {
       return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
@@ -105,13 +97,12 @@ export async function PUT(request: NextRequest) {
     const body = await request.json();
     const { id, activa } = body;
 
-    db.update(recurrentes)
+    await db.update(recurrentes)
       .set({ activa })
       .where(and(
         eq(recurrentes.id, id),
         eq(recurrentes.usuarioId, userId)
-      ))
-      .run();
+      ));
 
     return NextResponse.json({ success: true });
   } catch (error) {
@@ -123,25 +114,28 @@ export async function PUT(request: NextRequest) {
 // DELETE - eliminar
 export async function DELETE(request: NextRequest) {
   try {
-    const userId = getUserIdFromRequest(request);
+    const userId = await getUserIdFromRequest(request);
     
     if (!userId) {
       return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
     }
 
     const { searchParams } = new URL(request.url);
-    const id = parseInt(searchParams.get('id'));
+    const idParam = searchParams.get('id');
+    if (!idParam) {
+      return NextResponse.json({ error: 'ID requerido' }, { status: 400 });
+    }
+    const id = parseInt(idParam);
 
     if (!id) {
       return NextResponse.json({ error: 'ID requerido' }, { status: 400 });
     }
 
-    db.delete(recurrentes)
+    await db.delete(recurrentes)
       .where(and(
         eq(recurrentes.id, id),
         eq(recurrentes.usuarioId, userId)
-      ))
-      .run();
+      ));
 
     return NextResponse.json({ success: true });
   } catch (error) {

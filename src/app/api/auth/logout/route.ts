@@ -4,7 +4,7 @@ import { destroySession, getUserIdFromRequest } from '@/lib/sessions';
 export async function POST(request: Request) {
   try {
     // Obtener el token de la cookie y destruir la sesión
-    const userId = getUserIdFromRequest(request);
+    const userId = await getUserIdFromRequest(request);
     
     if (userId) {
       // Buscar y destruir la sesión del usuario
@@ -15,7 +15,7 @@ export async function POST(request: Request) {
         if (cookies) {
           const token = cookies.split('=')[1];
           if (token) {
-            destroySession(token);
+            await destroySession(token);
           }
         }
       }

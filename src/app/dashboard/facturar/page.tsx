@@ -184,7 +184,7 @@ export default function FacturarPage() {
       setMonto('');
     } catch (err) {
       console.error('Error:', err);
-      setError('Error de conexión: ' + err.message);
+      setError('Error de conexión: ' + (err as Error).message);
     } finally {
       setFacturando(false);
     }
@@ -419,7 +419,7 @@ export default function FacturarPage() {
                 <li>• Concepto: Servicios de Streaming</li>
                 {tipoFactura === 'E' && <li>• Moneda: {moneda}</li>}
                 {tipoFactura === 'E' && <li>• País: {clientePais}</li>}
-                <li>• IVA: {tipoFactura === 'C' || tipoFactura === 'E' ? 'No aplica (0%)' : '21%'}</li>}
+                <li>• IVA: {tipoFactura === 'C' || tipoFactura === 'E' ? 'No aplica (0%)' : '21%'}</li>
               </ul>
             </div>
 

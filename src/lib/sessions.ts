@@ -1,70 +1,65 @@
 // ============================================================
-// SISTEMA DE SESIONES con SQLite
+// SISTEMA DE SESIONES con PostgreSQL/Neon
 // Persiste entre reinicios
 // ============================================================
 
-import { db } from './db';
+import { db, sql } from './db';
 import { sessions, users } from './schema';
 import { eq, and, gt } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 
 // Generar token de sesión
-export function createSession(userId: number): { token: string; expiresAt: Date } {
+export async function createSession(userId: number): Promise<{ token: string; expiresAt: Date }> {
   const token = uuidv4();
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 días
   
   // Eliminar sesiones anteriores del usuario (anti-sharing)
-  db.delete(sessions)
-    .where(eq(sessions.usuarioId, userId))
-    .run();
+  await db.delete(sessions)
+    .where(eq(sessions.usuarioId, userId));
   
   // Insertar nueva sesión
-  db.insert(sessions)
+  await db.insert(sessions)
     .values({
       usuarioId: userId,
       token,
-      expiresAt: expiresAt.toISOString(),
-    })
-    .run();
+      expiresAt,
+    });
   
   return { token, expiresAt };
 }
 
 // Verificar si un token de sesión es válido
-export function verifySession(token: string): number | null {
-  const result = db.select()
+export async function verifySession(token: string): Promise<number | null> {
+  const result = await db.select()
     .from(sessions)
     .where(
       and(
         eq(sessions.token, token),
-        gt(sessions.expiresAt, new Date().toISOString())
+        gt(sessions.expiresAt, new Date())
       )
-    )
-    .get() as any;
+    );
   
-  if (!result) {
+  if (!result || result.length === 0) {
     return null;
   }
   
-  return result.usuarioId;
+  return result[0].usuarioId;
 }
 
 // Eliminar sesión (logout)
-export function destroySession(token: string): void {
-  db.delete(sessions)
-    .where(eq(sessions.token, token))
-    .run();
+export async function destroySession(token: string): Promise<void> {
+  await db.delete(sessions)
+    .where(eq(sessions.token, token));
 }
 
 // Eliminar todas las sesiones de un usuario (anti-sharing)
-export function destroyUserSessions(userId: number): void {
-  db.delete(sessions)
-    .where(eq(sessions.usuarioId, userId))
-    .run();
+export async function destroyUserSessions(userId: number): Promise<void> {
+  await db.delete(sessions)
+    .where(eq(sessions.usuarioId, userId));
 }
 
 // Obtener usuario desde request (busca en cookies)
-export function getUserIdFromRequest(request: Request): number | null {
+export async function getUserIdFromRequest(request: Request): Promise<number | null> {
   const cookieHeader = request.headers.get('cookie');
   if (!cookieHeader) return null;
   
@@ -78,9 +73,10 @@ export function getUserIdFromRequest(request: Request): number | null {
 }
 
 // Obtener usuario por email (para login)
-export function getUserByEmail(email: string) {
-  return db.select()
+export async function getUserByEmail(email: string) {
+  const result = await db.select()
     .from(users)
-    .where(eq(users.email, email))
-    .get() as any;
+    .where(eq(users.email, email));
+  
+  return result[0] || null;
 }

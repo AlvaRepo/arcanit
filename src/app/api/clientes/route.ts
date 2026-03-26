@@ -6,16 +6,15 @@ import { eq, and } from 'drizzle-orm';
 
 // GET - listar clientes
 export async function GET(request: NextRequest) {
-  const userId = getUserIdFromRequest(request);
+  const userId = await getUserIdFromRequest(request);
   
   if (!userId) {
     return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
   }
 
-  const userClientes = db.select()
+  const userClientes = await db.select()
     .from(clientes)
-    .where(eq(clientes.usuarioId, userId))
-    .all() as any[];
+    .where(eq(clientes.usuarioId, userId));
 
   return NextResponse.json({ clientes: userClientes.reverse() });
 }
@@ -23,7 +22,7 @@ export async function GET(request: NextRequest) {
 // POST - crear cliente
 export async function POST(request: NextRequest) {
   try {
-    const userId = getUserIdFromRequest(request);
+    const userId = await getUserIdFromRequest(request);
     
     if (!userId) {
       return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
@@ -36,7 +35,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Nombre y tipo son requeridos' }, { status: 400 });
     }
 
-    const result = db.insert(clientes)
+    const result = await db.insert(clientes)
       .values({
         usuarioId: userId,
         nombre,
@@ -48,10 +47,10 @@ export async function POST(request: NextRequest) {
         moneda: moneda || 'ARS',
         tipoFactura: tipoFactura || 'C',
       })
-      .run();
+      .returning({ id: clientes.id });
 
     const newCliente = {
-      id: result.lastInsertRowid,
+      id: result[0].id,
       usuarioId: userId,
       nombre,
       tipo,
@@ -74,25 +73,28 @@ export async function POST(request: NextRequest) {
 // DELETE - eliminar cliente
 export async function DELETE(request: NextRequest) {
   try {
-    const userId = getUserIdFromRequest(request);
+    const userId = await getUserIdFromRequest(request);
     
     if (!userId) {
       return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
     }
 
     const { searchParams } = new URL(request.url);
-    const id = parseInt(searchParams.get('id'));
+    const idParam = searchParams.get('id');
+    if (!idParam) {
+      return NextResponse.json({ error: 'ID requerido' }, { status: 400 });
+    }
+    const id = parseInt(idParam);
 
     if (!id) {
       return NextResponse.json({ error: 'ID requerido' }, { status: 400 });
     }
 
-    db.delete(clientes)
+    await db.delete(clientes)
       .where(and(
         eq(clientes.id, id),
         eq(clientes.usuarioId, userId)
-      ))
-      .run();
+      ));
 
     return NextResponse.json({ success: true });
   } catch (error) {

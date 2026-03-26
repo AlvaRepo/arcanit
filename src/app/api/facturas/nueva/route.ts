@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserIdFromRequest } from '@/lib/sessions';
-import { db } from '@/lib/db';
+import { db, sql } from '@/lib/db';
 import { facturas, users } from '@/lib/schema';
 import { eq, and } from 'drizzle-orm';
 
@@ -28,7 +28,7 @@ function calcularIVA(monto: number, tipo: string): { neto: number; iva: number }
 
 export async function POST(request: NextRequest) {
   try {
-    const userId = getUserIdFromRequest(request);
+    const userId = await getUserIdFromRequest(request);
     
     if (!userId) {
       return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
@@ -61,11 +61,10 @@ export async function POST(request: NextRequest) {
     const { neto, iva } = calcularIVA(monto, tipoLetra);
 
     // Obtener último número de factura del usuario
-    const lastInvoice = db.select()
+    const lastInvoice = await db.select()
       .from(facturas)
       .where(eq(facturas.usuarioId, userId))
-      .orderBy(facturas.numero)
-      .all() as any[];
+      .orderBy(facturas.numero);
     
     const numeroFactura = lastInvoice.length > 0 ? (lastInvoice[lastInvoice.length - 1].numero || 0) + 1 : 1;
 
@@ -74,28 +73,12 @@ export async function POST(request: NextRequest) {
     const fechaVencimiento = new Date();
     fechaVencimiento.setDate(fechaVencimiento.getDate() + 30);
 
-    // Guardar en DB
-    const result = db.insert(facturas)
-      .values({
-        usuarioId: userId,
-        clienteId: cliente?.id || null,
-        numero: numeroFactura,
-        tipo: `Factura ${tipoLetra}`,
-        tipoLetra: tipoLetra,
-        concepto: 'Servicios de Streaming',
-        monto: String(monto),
-        montoNeto: String(neto),
-        montoIVA: String(iva),
-        clienteDocTipo: cliente?.docTipo ? parseInt(cliente.docTipo) : 99,
-        clienteDocNro: cliente?.docNro || '',
-        clienteRazonSocial: cliente?.razonSocial || (tipoLetra === 'E' ? 'Cliente Exterior' : 'Consumidor Final'),
-        clientePais: cliente?.pais || '',
-        clienteMoneda: cliente?.moneda || 'ARS',
-        cae: cae,
-        caeVencimiento: fechaVencimiento.toISOString(),
-        resultado: 'A',
-      })
-      .run();
+    // Guardar en DB - usando SQL raw para evitar conflictos de tipos
+    await sql`INSERT INTO facturas (
+        usuario_id, cliente_id, numero, tipo, tipo_letra, concepto,
+        monto, monto_neto, monto_iva, cliente_doc_tipo, cliente_doc_nro,
+        cliente_razon_social, cliente_pais, cliente_moneda, cae, cae_vencimiento, resultado
+      ) VALUES (${userId}, ${cliente?.id || null}, ${numeroFactura}, ${`Factura ${tipoLetra}`}, ${tipoLetra}, ${'Servicios de Streaming'}, ${monto}, ${neto}, ${iva}, ${cliente?.docTipo ? parseInt(cliente.docTipo) : 99}, ${cliente?.docNro || ''}, ${cliente?.razonSocial || (tipoLetra === 'E' ? 'Cliente Exterior' : 'Consumidor Final')}, ${cliente?.pais || ''}, ${cliente?.moneda || 'ARS'}, ${cae}, ${fechaVencimiento.toISOString()}, ${'A'})`;
 
     return NextResponse.json({
       success: true,
@@ -122,17 +105,16 @@ export async function POST(request: NextRequest) {
 
 // GET - listar facturas del usuario
 export async function GET(request: NextRequest) {
-  const userId = getUserIdFromRequest(request);
+  const userId = await getUserIdFromRequest(request);
   
   if (!userId) {
     return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
   }
 
-  const userFacturas = db.select()
+  const userFacturas = await db.select()
     .from(facturas)
     .where(eq(facturas.usuarioId, userId))
-    .orderBy(facturas.numero)
-    .all() as any[];
+    .orderBy(facturas.numero);
 
   return NextResponse.json({ facturas: userFacturas.reverse() });
 }

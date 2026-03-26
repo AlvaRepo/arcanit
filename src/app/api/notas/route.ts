@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserIdFromRequest } from '@/lib/sessions';
-import { db } from '@/lib/db';
+import { db, sql } from '@/lib/db';
 import { notas } from '@/lib/schema';
 import { eq } from 'drizzle-orm';
 
@@ -14,17 +14,16 @@ const TIPO_NOTA_CODIGO: Record<string, { credito: number; debito: number }> = {
 
 // GET - listar notas
 export async function GET(request: NextRequest) {
-  const userId = getUserIdFromRequest(request);
+  const userId = await getUserIdFromRequest(request);
   
   if (!userId) {
     return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
   }
 
-  const userNotas = db.select()
+  const userNotas = await db.select()
     .from(notas)
     .where(eq(notas.usuarioId, userId))
-    .orderBy(notas.numero)
-    .all() as any[];
+    .orderBy(notas.numero);
 
   return NextResponse.json({ notas: userNotas.reverse() });
 }
@@ -32,7 +31,7 @@ export async function GET(request: NextRequest) {
 // POST - crear nota
 export async function POST(request: NextRequest) {
   try {
-    const userId = getUserIdFromRequest(request);
+    const userId = await getUserIdFromRequest(request);
     
     if (!userId) {
       return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
@@ -61,11 +60,10 @@ export async function POST(request: NextRequest) {
     }
 
     // Obtener último número de nota
-    const lastNotas = db.select()
+    const lastNotas = await db.select()
       .from(notas)
       .where(eq(notas.usuarioId, userId))
-      .orderBy(notas.numero)
-      .all() as any[];
+      .orderBy(notas.numero);
     
     const numeroNota = lastNotas.length > 0 ? (lastNotas[lastNotas.length - 1].numero || 0) + 1 : 1;
 
@@ -74,21 +72,11 @@ export async function POST(request: NextRequest) {
     const fechaVencimiento = new Date();
     fechaVencimiento.setDate(fechaVencimiento.getDate() + 30);
 
-    const result = db.insert(notas)
-      .values({
-        usuarioId: userId,
-        numero: numeroNota,
-        tipo,
-        tipoLetra,
-        motivo,
-        monto: String(monto),
-        montoNeto: String(montoNeto),
-        montoIVA: String(montoIVA),
-        cae,
-        caeVencimiento: fechaVencimiento.toISOString(),
-        resultado: 'A',
-      })
-      .run();
+    // Guardar en DB usando SQL raw
+    await sql`INSERT INTO notas (
+        usuario_id, numero, tipo, tipo_letra, motivo,
+        monto, monto_neto, monto_iva, cae, cae_vencimiento, resultado
+      ) VALUES (${userId}, ${numeroNota}, ${tipo}, ${tipoLetra}, ${motivo}, ${monto}, ${montoNeto}, ${montoIVA}, ${cae}, ${fechaVencimiento.toISOString()}, ${'A'})`;
 
     return NextResponse.json({
       success: true,

@@ -16,7 +16,7 @@ const ADMIN_USER = {
 export async function GET(request: NextRequest) {
   try {
     // Verificar sesión desde cookie
-    const userId = getUserIdFromRequest(request);
+    const userId = await getUserIdFromRequest(request);
     
     if (!userId) {
       return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
